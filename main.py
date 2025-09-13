@@ -16,61 +16,6 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtNetwork import QTcpServer, QTcpSocket, QHostAddress, QAbstractSocket, QNetworkInterface
 
-DARK_QSS = """
-/* ------- Base ------- */
-* { font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; font-size: 14px; }
-QWidget { background: #0b1220; color: #e5e7eb; }
-QToolTip { background-color: #111827; color: #e5e7eb; border: 1px solid #374151; padding: 6px; border-radius: 8px; }
-
-/* ------- Cards ------- */
-QGroupBox { border: 1px solid #334155; border-radius: 12px; margin-top: 16px; padding: 12px 12px 16px 12px; }
-QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; color: #93c5fd; background: #0b1220; }
-
-/* ------- Inputs ------- */
-QLineEdit, QSpinBox, QTextEdit { background: #0a1220; border: 1px solid #334155; border-radius: 10px; padding: 8px 10px; selection-background-color: #3b82f6; selection-color: #ffffff; }
-QLineEdit:focus, QSpinBox:focus, QTextEdit:focus { border: 1px solid #60a5fa; }
-
-/* ------- Buttons ------- */
-QPushButton { background: #1f2937; border: 1px solid #475569; padding: 8px 14px; border-radius: 10px; }
-QPushButton:hover { background: #263445; }
-QPushButton:pressed { background: #1b2533; }
-
-/* Button variants via objectName */
-QPushButton#primaryButton { background: #2563eb; border: none; color: white; }
-QPushButton#primaryButton:hover { background: #1d4ed8; }
-QPushButton#primaryButton:pressed { background: #1e40af; }
-
-QPushButton#secondaryButton { background: #0f172a; border: 1px solid #334155; }
-QPushButton#secondaryButton:hover { background: #111b34; }
-
-QPushButton#dangerButton { background: #b91c1c; border: none; color: white; }
-QPushButton#dangerButton:hover { background: #991b1b; }
-QPushButton#dangerButton:pressed { background: #7f1d1d; }
-
-QPushButton#ghostButton { background: transparent; border: 1px dashed #334155; }
-QPushButton#ghostButton:hover { background: rgba(148,163,184,0.08); }
-
-/* ------- Labels ------- */
-QLabel { color: #e5e7eb; }
-QLabel[warning="true"] { color: #f59e0b; }
-QLabel#statusLabel { color: #9ca3af; }
-
-/* ------- ProgressBar ------- */
-QProgressBar { background: #0a1220; border: 1px solid #334155; border-radius: 10px; text-align: center; padding: 3px; color: #e5e7eb; }
-QProgressBar::chunk { background: #22c55e; border-radius: 8px; }
-
-/* ------- Scrollbars ------- */
-QScrollBar:vertical { background: #0b1220; width: 12px; margin: 4px; }
-QScrollBar::handle:vertical { background: #334155; border-radius: 6px; min-height: 24px; }
-QScrollBar::handle:vertical:hover { background: #475569; }
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
-
-QScrollBar:horizontal { background: #0b1220; height: 12px; margin: 4px; }
-QScrollBar::handle:horizontal { background: #334155; border-radius: 6px; min-width: 24px; }
-QScrollBar::handle:horizontal:hover { background: #475569; }
-QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }
-"""
-
 # -------------------- 协议常量 --------------------
 MAGIC = b"PC"      # Protocol Chat
 VERSION = 1
@@ -614,7 +559,14 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("P2P Chat v2")
     app.setOrganizationName("Example")
-    app.setStyleSheet(DARK_QSS)
+    # 应用外部 QSS 主题，如果文件存在
+    qss_path = os.path.join(os.path.dirname(__file__), "style.qss")
+    try:
+        with open(qss_path, "r", encoding="utf-8") as f:
+            app.setStyleSheet(f.read())
+    except Exception:
+        # 找不到或读取失败时，继续使用默认样式
+        pass
 
     win = MainWindow()
     win.show()
