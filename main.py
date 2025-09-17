@@ -1,5 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+PyQt5 P2P 聊天（IP直连）v2.1 — 文本 + 文件传输 + QSS主题 + 在线账号/云端聊天记录
+-----------------------------------------------------------------------
+新增（v2.1）：
+1) 登录对话框（用户名/密码 + 数据库URL），支持注册新账号。
+2) 连接在线数据库，校验账号并把聊天记录（收/发、对端、时间戳、内容）写入云端。
+3) QSS 主题改为外部 style.qss（同目录）。
+
+依赖：
+    pip install PyQt5 SQLAlchemy bcrypt PyMySQL
+
+使用：
+    1) 准备数据库并拿到连接URL（例如 MySQL）：       mysql+pymysql://<user>:<password>@<host>:3306/<dbname>?charset=utf8mb4
+    2) 运行本程序，会弹出登录/注册对话框；首次可先“注册”。
+    3) 成功登录后，开始聊天；聊天文本将在线保存。
+
+安全提示：
+    直连数据库对公网开放具有风险，推荐在内网/VPC 或通过专用 API 层访问。
+"""
 
 import os
 import sys
@@ -8,14 +27,16 @@ import struct
 from dataclasses import dataclass
 from typing import Optional
 
-from PyQt5.QtCore import Qt, pyqtSignal, QObject, QDateTime, QTimer
+from PyQt5.QtCore import Qt, pyqtSignal, QObject, QDateTime
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTextEdit, QLineEdit, QPushButton, QLabel, QSpinBox, QMessageBox,
-    QGroupBox, QFormLayout, QFileDialog, QProgressBar, QCheckBox
+    QGroupBox, QFormLayout, QFileDialog, QProgressBar, QCheckBox, QDialog,
+    QDialogButtonBox
 )
 from PyQt5.QtNetwork import QTcpServer, QTcpSocket, QHostAddress, QAbstractSocket, QNetworkInterface
 
+<<<<<<< Updated upstream
 DARK_QSS = """
 /* ------- Base ------- */
 * { font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; font-size: 14px; }
@@ -70,6 +91,13 @@ QScrollBar::handle:horizontal { background: #334155; border-radius: 6px; min-wid
 QScrollBar::handle:horizontal:hover { background: #475569; }
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }
 """
+=======
+# === 引入数据层（data.py） ===
+try:
+    from .data import Database
+except Exception as _e:
+    Database = None  # 若找不到 data.py，在线功能将不可用
+>>>>>>> Stashed changes
 
 # -------------------- 协议常量 --------------------
 MAGIC = b"PC"      # Protocol Chat
@@ -211,7 +239,6 @@ class Peer(QObject):
             meta = json.dumps({"name": name, "size": size}).encode('utf-8')
             if not self._send_frame(T_FILE_META, meta):
                 return False
-            sent = 0
             with open(file_path, 'rb') as fp:
                 while True:
                     chunk = fp.read(CHUNK_SIZE)
@@ -219,9 +246,7 @@ class Peer(QObject):
                         break
                     if not self._send_frame(T_FILE_CHUNK, chunk):
                         return False
-                    sent += len(chunk)
-                    # 让事件循环处理 UI
-                    QApplication.processEvents()
+                    QApplication.processEvents()  # 让事件循环处理 UI
             return self._send_frame(T_FILE_END, b"")
         except Exception as e:
             self.error.emit(f"发送文件失败：{e}")
@@ -334,19 +359,86 @@ class Peer(QObject):
             return False
 
 
+# -------------------- 登录对话框 --------------------
+class LoginDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("登录 / 注册")
+        self.action = 'login'  # 'login' or 'register'
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+
+        self.db_url_edit = QLineEdit(os.getenv('DATABASE_URL', ''))
+        self.db_url_edit.setPlaceholderText("数据库URL，例如 mysql+pymysql://user:pass@host:3306/db?charset=utf8mb4")
+        self.username_edit = QLineEdit(); self.username_edit.setPlaceholderText("用户名")
+        self.password_edit = QLineEdit(); self.password_edit.setPlaceholderText("密码"); self.password_edit.setEchoMode(QLineEdit.Password)
+
+        form.addRow("数据库URL", self.db_url_edit)
+        form.addRow("用户名", self.username_edit)
+        form.addRow("密码", self.password_edit)
+
+        layout.addLayout(form)
+
+        self.btns = QDialogButtonBox()
+        self.login_btn = self.btns.addButton("登录", QDialogButtonBox.AcceptRole)
+        self.reg_btn = self.btns.addButton("注册", QDialogButtonBox.ActionRole)
+        self.cancel_btn = self.btns.addButton("取消", QDialogButtonBox.RejectRole)
+        layout.addWidget(self.btns)
+
+        self.login_btn.clicked.connect(self.on_login)
+        self.reg_btn.clicked.connect(self.on_register)
+        self.cancel_btn.clicked.connect(self.reject)
+
+    def on_login(self):
+        self.action = 'login'
+        if not self.username_edit.text().strip():
+            QMessageBox.warning(self, "提示", "请输入用户名"); return
+        if not self.password_edit.text():
+            QMessageBox.warning(self, "提示", "请输入密码"); return
+        if not self.db_url_edit.text().strip():
+            QMessageBox.warning(self, "提示", "请输入数据库URL"); return
+        self.accept()
+
+    def on_register(self):
+        self.action = 'register'
+        if not self.username_edit.text().strip():
+            QMessageBox.warning(self, "提示", "请输入用户名"); return
+        if not self.password_edit.text():
+            QMessageBox.warning(self, "提示", "请输入密码"); return
+        if not self.db_url_edit.text().strip():
+            QMessageBox.warning(self, "提示", "请输入数据库URL"); return
+        self.accept()
+
+    def values(self):
+        return (
+            self.db_url_edit.text().strip(),
+            self.username_edit.text().strip(),
+            self.password_edit.text(),
+            self.action,
+        )
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("P2P Chat v2 (PyQt5, IP直连)")
+        self.setWindowTitle("P2P Chat v2.1 (PyQt5, IP直连)")
         self.setObjectName("RootWindow")
-        self.resize(820, 600)
+        self.resize(860, 640)
 
         self.peer = Peer(self)
-        self.log_fp = None  # 聊天日志文件句柄
+        self.log_fp = None  # 本地聊天日志（可选）
+        self.db: Optional[Database] = None
+        self.user_id: Optional[int] = None
+        self.username: Optional[str] = None
+        self.current_peer: str = ""  # 当前连接的对端 "ip:port"
 
         self._build_ui()
         self._wire_signals()
         self.setAcceptDrops(True)
+
+        # 登录并初始化数据库
+        self._ensure_login()
 
     # -------------------- UI 构建 --------------------
     def _build_ui(self):
@@ -383,6 +475,7 @@ class MainWindow(QMainWindow):
 
         self.local_ip_label = QLabel("本机可用IP：" + ", ".join(get_local_ipv4_list()))
         self.status_label = QLabel("状态：未连接"); self.status_label.setObjectName("statusLabel")
+        self.account_label = QLabel("账号：未登录"); self.account_label.setObjectName("statusLabel")
 
         # 下载目录与日志
         dl_row = QHBoxLayout()
@@ -392,7 +485,7 @@ class MainWindow(QMainWindow):
         dl_row.addWidget(self.btn_browse)
         dl_widget = QWidget(); dl_widget.setLayout(dl_row)
 
-        self.chk_log = QCheckBox("保存聊天日志到文件")
+        self.chk_log = QCheckBox("保存聊天日志到本地文件")
         self.btn_choose_log = QPushButton("选择日志文件…"); self.btn_choose_log.setEnabled(False); self.btn_choose_log.setObjectName("ghostButton")
 
         log_row = QHBoxLayout(); log_row.addWidget(self.chk_log); log_row.addWidget(self.btn_choose_log)
@@ -404,6 +497,7 @@ class MainWindow(QMainWindow):
         ctrl_form.addRow(log_widget)
         ctrl_form.addRow(self.local_ip_label)
         ctrl_form.addRow(self.status_label)
+        ctrl_form.addRow(self.account_label)
 
         # 聊天区
         self.chat_view = QTextEdit(); self.chat_view.setReadOnly(True); self.chat_view.setPlaceholderText("聊天记录…（可拖拽文件到窗口发送）")
@@ -451,6 +545,38 @@ class MainWindow(QMainWindow):
         self.peer.file_progress.connect(self.on_file_progress)
         self.peer.file_saved.connect(self.on_file_saved)
 
+    # -------------------- 登录 / 数据库 --------------------
+    def _ensure_login(self):
+        if Database is None:
+            QMessageBox.warning(self, "在线功能不可用", "未找到 data.py 或依赖未安装，聊天仍可使用，但不会在线保存记录。")
+            self.account_label.setText("账号：离线模式")
+            return
+        while True:
+            dlg = LoginDialog(self)
+            if dlg.exec_() != QDialog.Accepted:
+                # 允许放弃在线功能
+                self.account_label.setText("账号：离线模式")
+                break
+            db_url, username, password, action = dlg.values()
+            try:
+                self.db = Database(db_url)
+                self.db.create_tables()
+                if action == 'register':
+                    self.db.create_user(username, password)
+                user = self.db.verify_user(username, password)
+                if not user:
+                    raise ValueError("用户名或密码不正确")
+                self.user_id = user['id']
+                self.username = user['username']
+                self.account_label.setText(f"账号：{self.username}")
+                self.append_sys("已登录，并启用在线聊天记录保存")
+                break
+            except Exception as e:
+                QMessageBox.critical(self, "登录失败", str(e))
+                self.db = None
+                self.user_id = None
+                self.username = None
+
     # -------------------- 事件处理 --------------------
     def on_listen(self):
         port = int(self.port_spin.value())
@@ -471,6 +597,7 @@ class MainWindow(QMainWindow):
         self.peer.close_socket(); self.peer.stop_listening()
         self.append_sys("已请求断开/停止监听")
         self.set_connected_ui(False)
+        self.current_peer = ""
 
     def on_send_text(self):
         text = self.input_edit.text().strip()
@@ -481,6 +608,7 @@ class MainWindow(QMainWindow):
             self.append_me(text)
             self.input_edit.clear()
             self._log_line(f"[我 {now_ts()}] {text}")
+            self._save_online(direction='sent', content=text)
         else:
             self.append_sys("发送失败：尚未连接")
 
@@ -496,14 +624,17 @@ class MainWindow(QMainWindow):
     def on_message_received(self, text: str):
         self.chat_view.append(f"<b style='color:#1565c0'>对方</b> <span style='color:#999'>[{now_ts()}]</span>：{self._escape(text)}")
         self._log_line(f"[对方 {now_ts()}] {text}")
+        self._save_online(direction='recv', content=text)
 
     def on_connected(self, peer_addr: str):
         self.append_sys(f"已连接：{peer_addr}")
+        self.current_peer = peer_addr
         self.set_connected_ui(True)
 
     def on_disconnected(self):
         self.append_sys("连接已断开")
         self.set_connected_ui(False)
+        self.current_peer = ""
 
     def on_error(self, err: str):
         self.append_sys(f"<span style='color:#c62828'>错误</span>：{self._escape(err)}")
@@ -524,6 +655,21 @@ class MainWindow(QMainWindow):
     def on_file_saved(self, path: str):
         self.append_sys(f"文件已保存：{path}")
         self.prog_label.setText("文件传输：完成")
+
+    # 在线存储
+    def _save_online(self, direction: str, content: str):
+        if not self.db or not self.user_id:
+            return
+        try:
+            self.db.save_message(
+                user_id=self.user_id,
+                peer=self.current_peer or "",
+                direction=direction,
+                content=content,
+            )
+        except Exception as e:
+            # 在线写入失败不打断聊天
+            self.append_sys(f"在线保存失败：{e}")
 
     # 下载与日志设置
     def on_choose_download_dir(self):
@@ -556,7 +702,7 @@ class MainWindow(QMainWindow):
                 self.log_fp.close()
             except Exception:
                 pass
-            self.log_fp = None
+        self.log_fp = None
 
     # -------------------- UI 辅助 --------------------
     def set_connected_ui(self, connected: bool):
@@ -609,12 +755,30 @@ class MainWindow(QMainWindow):
                 if not ok:
                     self.append_sys("发送文件失败")
 
+    def closeEvent(self, event):
+        try:
+            if self.db:
+                self.db.close()
+        except Exception:
+            pass
+        super().closeEvent(event)
+
 
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("P2P Chat v2")
+    app.setApplicationName("P2P Chat v2.1")
     app.setOrganizationName("Example")
+<<<<<<< Updated upstream
     app.setStyleSheet(DARK_QSS)
+=======
+    # 外部 QSS 主题（可选）
+    qss_path = os.path.join(os.path.dirname(__file__), "style.qss")
+    try:
+        with open(qss_path, "r", encoding="utf-8") as f:
+            app.setStyleSheet(f.read())
+    except Exception:
+        pass
+>>>>>>> Stashed changes
 
     win = MainWindow()
     win.show()
